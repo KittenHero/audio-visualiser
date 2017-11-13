@@ -12,7 +12,7 @@ def setup():
         sd.query_devices('pulse')
         sd.default.device = 'pulse'
 
-def vis_audio(audiofile):
+def visualise(audiofile):
     data, subfig = {}, {}
     audio, sample_rate = sf.read(audiofile, dtype='float64')
     nsample, nchannel = audio.shape
@@ -62,14 +62,15 @@ def vis_audio(audiofile):
             ltick = tick
 
     def update_sample(offset, shift):
+        if offset >= nsample:
+            return []
+
         if shift > sample_rate:
             offset += shift // sample_rate * sample_rate
             shift %= sample_rate
         dshift = (skip - 1 + shift) // skip
         data['audio_sample'] = np.roll(data['audio_sample'], -dshift, axis=1)
 
-        if offset >= nsample:
-            return []
         for ch, (line, ch_sample) in enumerate(zip(subfig['sample'], data['audio_sample'])):
             if offset + shift < nsample:
                 ch_sample[-dshift:] = ch + audio[offset:offset + shift:skip, ch]
@@ -81,9 +82,10 @@ def vis_audio(audiofile):
         return subfig['sample']
 
     def update_freq(offset, shift):
-        freq_axis = np.fft.rfftfreq(min(shift, nsample - offset) or 1, 1 / sample_rate)
         if offset >= nsample:
             return []
+
+        freq_axis = np.fft.rfftfreq(min(shift, nsample - offset) or 1, 1 / sample_rate)
         for ch, line in enumerate(subfig['freq']):
             if offset + shift < nsample:
                 fft = np.abs(np.fft.rfft(audio[offset:offset + shift, ch]))
@@ -123,4 +125,4 @@ if __name__ == '__main__':
     parser.add_argument('file', metavar='f', help='wav file')
     args = parser.parse_args()
     setup()
-    vis_audio(args.file)
+    visualise(args.file)
