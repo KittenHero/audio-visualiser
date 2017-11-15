@@ -24,26 +24,24 @@ def visualise(audiofile):
     n_history = 1024
 
     def setup_plot():
-        data['energy_buffer'] = np.zeros((nchannel, buffer_size, n_bands))
-        data['shift_buffer'] = 0
-        time_axis = [- i/sample_rate for i in range(sample_rate)[::-skip]]
-        data['audio_sample'] = np.array([[ch]*len(time_axis) for ch in range(nchannel)], dtype=np.float64)
+        setup_dict = {
+            'sample': setup_sample,
+            'freq': setup_freq,
+            'beat' : setup_beat
+        }
 
-        fig, ax = plt.subplots(3, 1)
+        fig, ax = plt.subplots(len(setup_dict), 1)
         data['fig'] = fig
-        subfig['sample'] = ax[0].plot(time_axis, data['audio_sample'].T)
-        subfig['freq'] = ax[1].plot([1], [[1, -1]])
-        subfig['energy'] = ax[2].plot(range(n_bands), np.zeros((n_bands, nchannel)))
-
-        limits = (time_axis[0], time_axis[-1], audio.min(), nchannel - 1 + audio.max())
-        ax[0].axis(limits)
-        ax[1].axis((0, 20000, -200, 200))
-        ax[2].axis((0, n_bands, 0, 40))
 
         for axis in ax:
             axis.set_axis_off()
         fig.set_facecolor('black')
         fig.subplots_adjust(left=0.01, right=0.99, top=0.99, bottom=0.01, hspace=0, wspace=0)
+
+        for i, (plot_type, setup_func) in enumerate(setup_dict.items()):
+            setup_data = setup_func(ax[i])
+            subfig[plot_type] = setup_data.pop('plot')
+            data.update(setup_data)
 
     def update(frame_data):
         offset, shift = frame_data
@@ -61,6 +59,15 @@ def visualise(audiofile):
             yield offset, shift
             ltick = tick
 
+    def setup_sample(axes):
+        time_axis = [- i/sample_rate for i in range(sample_rate)[::-skip]]
+        limits = (time_axis[0], time_axis[-1], audio.min(), nchannel - 1 + audio.max())
+        axes.axis(limits)
+        sample_buffer = np.array([[ch]*len(time_axis) for ch in range(nchannel)], dtype=np.float64)
+        return {
+            'plot'           : axes.plot(time_axis, sample_buffer.T),
+            'sample_buffer' : sample_buffer
+        }
     def update_sample(offset, shift):
         if offset >= nsample:
             return []
@@ -69,9 +76,9 @@ def visualise(audiofile):
             offset += shift // sample_rate * sample_rate
             shift %= sample_rate
         dshift = (skip - 1 + shift) // skip
-        data['audio_sample'] = np.roll(data['audio_sample'], -dshift, axis=1)
+        data['sample_buffer'] = np.roll(data['sample_buffer'], -dshift, axis=1)
 
-        for ch, (line, ch_sample) in enumerate(zip(subfig['sample'], data['audio_sample'])):
+        for ch, (line, ch_sample) in enumerate(zip(subfig['sample'], data['sample_buffer'])):
             if offset + shift < nsample:
                 ch_sample[-dshift:] = ch + audio[offset:offset + shift:skip, ch]
             else:
@@ -81,6 +88,9 @@ def visualise(audiofile):
 
         return subfig['sample']
 
+    def setup_freq(axes):
+        axes.axis((0, 20000, -200, 200))
+        return {'plot' : axes.plot([1], [[1, -1]])}
     def update_freq(offset, shift):
         if offset >= nsample:
             return []
@@ -95,15 +105,22 @@ def visualise(audiofile):
             line.set_ydata((ch%2 * 2 - 1)*fft)
         return subfig['freq']
 
+    def setup_beat(axes):
+        axes.axis((0, n_bands, 0, 40))
+        return {
+            'plot' : axes.plot(range(n_bands), np.zeros((n_bands, nchannel))),
+            'shift_buffer' : 0,
+            'history_buffer' : np.zeros((nchannel, buffer_size, n_bands))
+        }
     def update_beat(offset):
         shift_buffer = data['shift_buffer']
         if offset - shift_buffer < n_history or offset >= nsample:
             return []
         n_update = (offset - shift_buffer) // n_history
         data['shift_buffer'] += n_update*n_history
-        data['energy_buffer'] = np.roll(data['energy_buffer'], -n_update, axis=0)
-        energy_buffer = data['energy_buffer']
-        for ch, (line, ch_buff) in enumerate(zip(subfig['energy'], energy_buffer)):
+        data['history_buffer'] = np.roll(data['history_buffer'], -n_update, axis=0)
+        energy_buffer = data['history_buffer']
+        for ch, (line, ch_buff) in enumerate(zip(subfig['beat'], energy_buffer)):
             for i in range(n_update):
                 if n_update - i >= n_history:
                     continue
@@ -113,7 +130,7 @@ def visualise(audiofile):
                     for j, k in enumerate(accumulate(range(n_bands)))
                 ])
             line.set_ydata(ch_buff[-1])
-        return subfig['energy']
+        return subfig['beat']
 
     setup_plot()
     animation = fa(data['fig'], update, frames=timer, interval=interval, repeat=0, blit=1)
